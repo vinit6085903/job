@@ -2,33 +2,87 @@ import streamlit as st
 import requests
 
 # =========================
-# PAGE CONFIG
+# CONFIG
 # =========================
+API_URL = "https://job-kd84.onrender.com/predict"
+
 st.set_page_config(
-    page_title="Fake Job Detection",
-    page_icon="🕵️",
+    page_title="Fake Job Detection | EquinoxSphere",
+    page_icon="🕵️‍♂️",
     layout="centered"
 )
 
-st.title("🕵️ Fake Job Detection System")
-st.write("AI-based system to check whether a job posting is **Real, Suspicious, or Fake**")
+# =========================
+# CUSTOM CSS (PRO LOOK)
+# =========================
+st.markdown("""
+<style>
+.main {
+    background-color: #0e1117;
+}
+h1, h2, h3, h4 {
+    color: #f5f5f5;
+}
+label {
+    color: #cfcfcf !important;
+}
+.stButton>button {
+    background: linear-gradient(90deg, #00c6ff, #0072ff);
+    color: white;
+    border-radius: 10px;
+    height: 3em;
+    font-size: 16px;
+    font-weight: 600;
+}
+.card {
+    background-color: #161b22;
+    padding: 20px;
+    border-radius: 15px;
+    margin-top: 20px;
+}
+.metric {
+    font-size: 22px;
+    font-weight: bold;
+}
+.footer {
+    text-align: center;
+    color: gray;
+    font-size: 13px;
+    margin-top: 40px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# =========================
+# HEADER
+# =========================
+st.markdown(
+    "<h1 style='text-align:center;'>🕵️ Fake Job Detection System</h1>",
+    unsafe_allow_html=True
+)
+st.markdown(
+    "<p style='text-align:center;color:#bdbdbd;'>AI-powered platform to identify <b>Real, Suspicious, or Fake</b> job postings</p>",
+    unsafe_allow_html=True
+)
 
 st.markdown("---")
 
 # =========================
-# INPUT FIELDS
+# INPUT FORM
 # =========================
-title = st.text_input("📌 Job Title")
-company_profile = st.text_area("🏢 Company Profile")
-description = st.text_area("📝 Job Description")
-requirements = st.text_area("📋 Requirements")
-benefits = st.text_area("🎁 Benefits")
+with st.form("job_form"):
+    title = st.text_input("📌 Job Title")
+    company_profile = st.text_area("🏢 Company Profile")
+    description = st.text_area("📝 Job Description")
+    requirements = st.text_area("📋 Requirements")
+    benefits = st.text_area("🎁 Benefits")
+
+    submit = st.form_submit_button("🔍 Analyze Job")
 
 # =========================
-# BUTTON
+# PREDICTION
 # =========================
-if st.button("🔍 Check Job"):
-
+if submit:
     payload = {
         "title": title,
         "company_profile": company_profile,
@@ -37,31 +91,20 @@ if st.button("🔍 Check Job"):
         "benefits": benefits
     }
 
-    try:
-        response = requests.post(
-            "http://127.0.0.1:8000/predict",
-            json=payload,
-            timeout=10
-        )
+    with st.spinner("Analyzing job posting..."):
+        try:
+            res = requests.post(API_URL, json=payload, timeout=20)
 
-        if response.status_code == 200:
-            result = response.json()
+            if res.status_code == 200:
+                result = res.json()
 
-            # =========================
-            # HANDLE VALIDATION ERROR
-            # =========================
-            if "status" in result:
-                st.warning(result["message"])
-            else:
                 prediction = result["prediction"]
                 fake_prob = result["fake_probability"]
                 reason = result["decision_reason"]
 
-                st.markdown("## 🧾 Result")
+                st.markdown("<div class='card'>", unsafe_allow_html=True)
+                st.markdown("## 🧾 Analysis Result")
 
-                # =========================
-                # DISPLAY RESULT
-                # =========================
                 if "FAKE" in prediction:
                     st.error(f"🚨 {prediction}")
                 elif "SUSPICIOUS" in prediction:
@@ -69,17 +112,27 @@ if st.button("🔍 Check Job"):
                 else:
                     st.success(f"✅ {prediction}")
 
-                st.markdown(f"**Fake Probability:** `{fake_prob}`")
+                st.markdown(
+                    f"<p class='metric'>Fake Probability: {round(fake_prob*100,2)}%</p>",
+                    unsafe_allow_html=True
+                )
                 st.markdown(f"**Reason:** {reason}")
 
-                st.markdown("---")
                 st.info(
-                    "ℹ️ **Tip:** If a job is marked *Suspicious*, verify the company website, "
-                    "LinkedIn page, and never pay any registration fees."
+                    "ℹ️ Tip: Never pay registration fees. Always verify the company website and LinkedIn presence."
                 )
+                st.markdown("</div>", unsafe_allow_html=True)
 
-        else:
-            st.error("❌ Server error. Please try again.")
+            else:
+                st.error("❌ Server error. Please try again later.")
 
-    except Exception as e:
-        st.error("🚫 FastAPI server not running. Please start backend first.")
+        except Exception:
+            st.error("🚫 Backend server is unreachable.")
+
+# =========================
+# FOOTER
+# =========================
+st.markdown(
+    "<div class='footer'>Built by <b>EquinoxSphere</b> • AI Systems & Automation</div>",
+    unsafe_allow_html=True
+)
