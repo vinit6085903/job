@@ -1,138 +1,74 @@
-import streamlit as st
-import requests
+from flask import Flask, request, jsonify, render_template
+import tensorflow as tf
+import pickle
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 # =========================
 # CONFIG
 # =========================
-API_URL = "https://job-kd84.onrender.com/predict"
+MAX_LEN = 300
+FAKE_THRESHOLD = 0.50
+SUSPICIOUS_THRESHOLD = 0.15
 
-st.set_page_config(
-    page_title="Fake Job Detection | EquinoxSphere",
-    page_icon="🕵️‍♂️",
-    layout="centered"
+# =========================
+# LOAD MODEL & TOKENIZER
+# =========================
+model = tf.keras.models.load_model(
+    "saved_model/fake_job_lstm_model.keras"
 )
 
-# =========================
-# CUSTOM CSS (PRO LOOK)
-# =========================
-st.markdown("""
-<style>
-.main {
-    background-color: #0e1117;
-}
-h1, h2, h3, h4 {
-    color: #f5f5f5;
-}
-label {
-    color: #cfcfcf !important;
-}
-.stButton>button {
-    background: linear-gradient(90deg, #00c6ff, #0072ff);
-    color: white;
-    border-radius: 10px;
-    height: 3em;
-    font-size: 16px;
-    font-weight: 600;
-}
-.card {
-    background-color: #161b22;
-    padding: 20px;
-    border-radius: 15px;
-    margin-top: 20px;
-}
-.metric {
-    font-size: 22px;
-    font-weight: bold;
-}
-.footer {
-    text-align: center;
-    color: gray;
-    font-size: 13px;
-    margin-top: 40px;
-}
-</style>
-""", unsafe_allow_html=True)
+with open("saved_model/tokenizer.pkl", "rb") as f:
+    tokenizer = pickle.load(f)
 
 # =========================
-# HEADER
+# FLASK APP
 # =========================
-st.markdown(
-    "<h1 style='text-align:center;'>🕵️ Fake Job Detection System</h1>",
-    unsafe_allow_html=True
-)
-st.markdown(
-    "<p style='text-align:center;color:#bdbdbd;'>AI-powered platform to identify <b>Real, Suspicious, or Fake</b> job postings</p>",
-    unsafe_allow_html=True
-)
+app = Flask(__name__)
 
-st.markdown("---")
+# 🔹 Serve SPA HTML
+@app.route("/")
+def home():
+    return render_template("index.html")
 
-# =========================
-# INPUT FORM
-# =========================
-with st.form("job_form"):
-    title = st.text_input("📌 Job Title")
-    company_profile = st.text_area("🏢 Company Profile")
-    description = st.text_area("📝 Job Description")
-    requirements = st.text_area("📋 Requirements")
-    benefits = st.text_area("🎁 Benefits")
+# 🔹 API
+@app.route("/predict", methods=["POST"])
+def predict_job():
+    data = request.get_json()
 
-    submit = st.form_submit_button("🔍 Analyze Job")
+    text = " ".join([
+        data.get("title", "").strip(),
+        data.get("company_profile", "").strip(),
+        data.get("description", "").strip(),
+        data.get("requirements", "").strip(),
+        data.get("benefits", "").strip()
+    ])
 
-# =========================
-# PREDICTION
-# =========================
-if submit:
-    payload = {
-        "title": title,
-        "company_profile": company_profile,
-        "description": description,
-        "requirements": requirements,
-        "benefits": benefits
-    }
+    if len(text) < 30:
+        return jsonify({
+            "status": "INSUFFICIENT DATA ❗",
+            "message": "Please provide proper job details for analysis."
+        }), 400
 
-    with st.spinner("Analyzing job posting..."):
-        try:
-            res = requests.post(API_URL, json=payload, timeout=20)
+    seq = tokenizer.texts_to_sequences([text])
+    padded = pad_sequences(seq, maxlen=MAX_LEN, padding="post")
 
-            if res.status_code == 200:
-                result = res.json()
+    fake_prob = float(model.predict(padded, verbose=0)[0][0])
 
-                prediction = result["prediction"]
-                fake_prob = result["fake_probability"]
-                reason = result["decision_reason"]
+    if fake_prob >= FAKE_THRESHOLD:
+        label = "FAKE JOB ❌"
+        reason = "High similarity with known scam patterns"
+    elif fake_prob >= SUSPICIOUS_THRESHOLD:
+        label = "SUSPICIOUS ⚠️"
+        reason = "Generic language / easy-money keywords detected"
+    else:
+        label = "LIKELY REAL ✅"
+        reason = "Job details appear professional and structured"
 
-                st.markdown("<div class='card'>", unsafe_allow_html=True)
-                st.markdown("## 🧾 Analysis Result")
+    return jsonify({
+        "prediction": label,
+        "fake_probability": round(fake_prob, 4),
+        "decision_reason": reason
+    })
 
-                if "FAKE" in prediction:
-                    st.error(f"🚨 {prediction}")
-                elif "SUSPICIOUS" in prediction:
-                    st.warning(f"⚠️ {prediction}")
-                else:
-                    st.success(f"✅ {prediction}")
-
-                st.markdown(
-                    f"<p class='metric'>Fake Probability: {round(fake_prob*100,2)}%</p>",
-                    unsafe_allow_html=True
-                )
-                st.markdown(f"**Reason:** {reason}")
-
-                st.info(
-                    "ℹ️ Tip: Never pay registration fees. Always verify the company website and LinkedIn presence."
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            else:
-                st.error("❌ Server error. Please try again later.")
-
-        except Exception:
-            st.error("🚫 Backend server is unreachable.")
-
-# =========================
-# FOOTER
-# =========================
-st.markdown(
-    "<div class='footer'>Built by <b>EquinoxSphere</b> • AI Systems & Automation</div>",
-    unsafe_allow_html=True
-)
+if __name__ == "__main__":
+    app.run(debug=True)

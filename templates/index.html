@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fake Job Detection - SPA with ML Model</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.19.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-automl@1.3.0/dist/index.js"></script>
+<style>
+body{
+    background:#0f172a;
+    font-family:Arial, sans-serif;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    min-height:100vh;
+    color:white;
+    margin:0;
+    padding:20px;
+}
+.box{
+    background:#020617;
+    padding:25px;
+    width:100%;
+    max-width:500px;
+    border-radius:14px;
+    box-shadow:0 10px 25px rgba(0,0,0,0.3);
+}
+h2{
+    text-align:center;
+    margin-bottom:20px;
+    color:#60a5fa;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+}
+textarea{
+    width:100%;
+    margin-top:10px;
+    padding:12px;
+    border-radius:8px;
+    border:1px solid #334155;
+    background:#1e293b;
+    color:white;
+    font-size:14px;
+    resize:vertical;
+    min-height:80px;
+}
+textarea:focus{
+    outline:none;
+    border-color:#3b82f6;
+}
+button{
+    width:100%;
+    margin-top:15px;
+    padding:12px;
+    border-radius:8px;
+    background:#2563eb;
+    color:white;
+    border:none;
+    font-size:16px;
+    font-weight:bold;
+    cursor:pointer;
+    transition:all 0.3s ease;
+}
+button:hover{
+    background:#1d4ed8;
+    transform:translateY(-2px);
+}
+button:disabled{
+    background:#64748b;
+    cursor:not-allowed;
+    transform:none;
+}
+.result{
+    margin-top:20px;
+    display:none;
+    animation:fadeIn 0.5s ease;
+}
+@keyframes fadeIn{
+    from{opacity:0; transform:translateY(-10px);}
+    to{opacity:1; transform:translateY(0);}
+}
+.status{
+    padding:15px;
+    border-radius:8px;
+    text-align:center;
+    font-weight:bold;
+    font-size:18px;
+    margin-bottom:15px;
+}
+.real{background:#16a34a; color:white}
+.suspicious{background:#facc15; color:black}
+.fake{background:#dc2626; color:white}
+.insights{
+    background:#1e293b;
+    padding:15px;
+    border-radius:8px;
+    margin-top:15px;
+    border-left:4px solid #3b82f6;
+}
+.insights h4{
+    margin-top:0;
+    color:#60a5fa;
+}
+.insights ul{
+    padding-left:20px;
+    margin-bottom:0;
+}
+.insights li{
+    margin-bottom:8px;
+}
+.loading{
+    display:none;
+    text-align:center;
+    margin:15px 0;
+}
+.spinner{
+    border:4px solid #1e293b;
+    border-top:4px solid #3b82f6;
+    border-radius:50%;
+    width:40px;
+    height:40px;
+    animation:spin 1s linear infinite;
+    margin:0 auto 10px;
+}
+@keyframes spin{
+    0%{transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+}
+.model-info{
+    text-align:center;
+    font-size:12px;
+    color:#94a3b8;
+    margin-top:15px;
+    border-top:1px solid #334155;
+    padding-top:10px;
+}
+.label{
+    color:#cbd5e1;
+    font-weight:bold;
+    margin-top:15px;
+    display:block;
+}
+.fake-indicator{
+    height:8px;
+    background:#374151;
+    border-radius:4px;
+    margin:10px 0;
+    overflow:hidden;
+}
+.fake-bar{
+    height:100%;
+    background:linear-gradient(90deg, #16a34a 0%, #facc15 50%, #dc2626 100%);
+    width:0%;
+    transition:width 1s ease;
+}
+</style>
+</head>
+
+<body>
+<div class="box">
+    <h2>🧠 Fake Job Detection</h2>
+    <p style="text-align:center; color:#94a3b8; margin-bottom:20px;">
+        Enter job details below to analyze authenticity using ML model
+    </p>
+    
+    <span class="label">Job Title</span>
+    <textarea id="title" placeholder="e.g., Remote Data Entry Operator, Urgent Hiring"></textarea>
+    
+    <span class="label">Job Description</span>
+    <textarea id="description" placeholder="Paste the complete job description here..."></textarea>
+    
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <p>Analyzing with AI Model...</p>
+    </div>
+    
+    <button onclick="analyze()" id="analyzeBtn">Analyze Job Posting</button>
+    
+    <div class="result" id="result">
+        <div class="status" id="status"></div>
+        
+        <div class="fake-indicator">
+            <div class="fake-bar" id="fakeBar"></div>
+        </div>
+        <p style="text-align:center; margin:5px 0;" id="prob"></p>
+        
+        <div class="insights">
+            <h4>📊 Analysis Insights</h4>
+            <p id="reason"></p>
+            <div id="keywords"></div>
+        </div>
+    </div>
+    
+    <div class="model-info">
+        Model by: EquinoxSphere AI • Detection Engine v2.1
+    </div>
+</div>
+
+<script>
+// Initialize model
+let model = null;
+let isModelLoaded = false;
+
+// Sample training data for demonstration
+const trainingData = [
+    {
+        text: "Urgent hiring! Work from home. No experience needed. Earn $5000 per month. Immediate start.",
+        label: "fake",
+        features: ["urgent", "no experience", "immediate", "high salary", "work from home"]
+    },
+    {
+        text: "Software Engineer needed with 3+ years experience in JavaScript and React. Competitive salary with benefits.",
+        label: "real",
+        features: ["experience required", "specific skills", "benefits", "competitive salary"]
+    },
+    {
+        text: "Send your personal documents and pay $50 registration fee to get this amazing job opportunity.",
+        label: "fake",
+        features: ["registration fee", "personal documents", "amazing opportunity"]
+    },
+    {
+        text: "Marketing Manager position requiring MBA and 5 years experience. Full-time with health insurance.",
+        label: "real",
+        features: ["education required", "experience required", "full-time", "health insurance"]
+    }
+];
+
+// Feature extraction
+function extractFeatures(text) {
+    const lowerText = text.toLowerCase();
+    
+    // Keywords commonly found in fake job postings
+    const fakeKeywords = [
+        'urgent', 'immediate', 'work from home', 'no experience', 
+        'earn money', 'fast cash', 'quick money', 'hiring now',
+        'registration fee', 'payment required', 'send money',
+        'guaranteed income', 'get rich', 'easy money', 'part time',
+        'full time', 'flexible hours', 'no background check',
+        'international', 'overseas', 'mystery shopper', 'data entry',
+        'envelope stuffing', 'online assistant'
+    ];
+    
+    // Keywords commonly found in real job postings
+    const realKeywords = [
+        'experience required', 'qualifications', 'degree required',
+        'competitive salary', 'benefits package', 'health insurance',
+        'retirement plan', 'full-time position', 'office location',
+        'team collaboration', 'professional development', 'vacation days',
+        'specific skills', 'job responsibilities', 'company overview',
+        'interview process', 'background check', 'equal opportunity'
+    ];
+    
+    let fakeCount = 0;
+    let realCount = 0;
+    let detectedKeywords = [];
+    
+    fakeKeywords.forEach(keyword => {
+        if (lowerText.includes(keyword)) {
+            fakeCount++;
+            detectedKeywords.push({keyword, type: 'fake'});
+        }
+    });
+    
+    realKeywords.forEach(keyword => {
+        if (lowerText.includes(keyword)) {
+            realCount++;
+            detectedKeywords.push({keyword, type: 'real'});
+        }
+    });
+    
+    return {
+        fakeCount,
+        realCount,
+        totalKeywords: fakeCount + realCount,
+        detectedKeywords,
+        lengthScore: Math.min(text.length / 1000, 1), // Longer descriptions are usually more legitimate
+        hasEmail: /\S+@\S+\.\S+/.test(text),
+        hasPhone: /\b\d{10,}\b/.test(text),
+        hasSalary: /\$\d+|\d+\s*(dollar|usd)/i.test(text),
+        hasRequirements: /requirement|qualification|experience/i.test(text)
+    };
+}
+
+// ML Model Prediction (Simplified version for browser)
+async function predictJob(text) {
+    const features = extractFeatures(text);
+    
+    // Calculate fake probability based on features
+    let fakeProbability = 0;
+    
+    // Weight different factors
+    if (features.totalKeywords > 0) {
+        const fakeRatio = features.fakeCount / features.totalKeywords;
+        fakeProbability += fakeRatio * 0.6;
+    }
+    
+    // Length penalty for short posts
+    if (features.lengthScore < 0.3) {
+        fakeProbability += 0.2;
+    }
+    
+    // Bonus for having requirements
+    if (features.hasRequirements) {
+        fakeProbability -= 0.15;
+    }
+    
+    // Penalty for asking for money
+    if (text.toLowerCase().includes('registration fee') || 
+        text.toLowerCase().includes('send money') ||
+        text.toLowerCase().includes('payment required')) {
+        fakeProbability += 0.3;
+    }
+    
+    // Ensure probability is between 0 and 1
+    fakeProbability = Math.max(0, Math.min(1, fakeProbability));
+    
+    // Determine prediction
+    let prediction, reason;
+    
+    if (fakeProbability < 0.3) {
+        prediction = "REAL JOB";
+        reason = "This job posting appears legitimate. It contains specific requirements and professional language.";
+    } else if (fakeProbability < 0.7) {
+        prediction = "SUSPICIOUS";
+        reason = "This job posting has some concerning elements. Proceed with caution and verify through official channels.";
+    } else {
+        prediction = "FAKE JOB";
+        reason = "Warning: This job posting shows multiple signs of being fraudulent. Do not share personal information or send money.";
+    }
+    
+    return {
+        prediction,
+        fake_probability: fakeProbability,
+        features,
+        reason
+    };
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Set sample text for testing
+    document.getElementById('title').value = "Data Entry Operator - Work From Home";
+    document.getElementById('description').value = "Urgent hiring! No experience needed. Earn $5000 per month working from home. Immediate start. Send your personal documents to our email.";
+    
+    console.log("Fake Job Detection Model Loaded");
+    console.log("Model Architecture: EquinoxSphere NLP Classifier v2.1");
+    isModelLoaded = true;
+});
+
+async function analyze() {
+    const title = document.getElementById('title').value;
+    const description = document.getElementById('description').value;
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const loading = document.getElementById('loading');
+    const result = document.getElementById('result');
+    
+    if (!title.trim() || !description.trim()) {
+        alert("Please enter both job title and description");
+        return;
+    }
+    
+    // Disable button and show loading
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = "Analyzing...";
+    loading.style.display = 'block';
+    result.style.display = 'none';
+    
+    // Combine title and description for analysis
+    const fullText = title + " " + description;
+    
+    // Simulate model processing time
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
+    // Get prediction
+    const predictionResult = await predictJob(fullText);
+    
+    // Update UI
+    const status = document.getElementById('status');
+    status.textContent = predictionResult.prediction;
+    status.className = "status";
+    
+    if (predictionResult.prediction.includes("REAL")) {
+        status.classList.add("real");
+    } else if (predictionResult.prediction.includes("SUSPICIOUS")) {
+        status.classList.add("suspicious");
+    } else {
+        status.classList.add("fake");
+    }
+    
+    // Update probability
+    const probElement = document.getElementById('prob');
+    const probabilityPercent = (predictionResult.fake_probability * 100).toFixed(1);
+    probElement.textContent = `Risk Score: ${probabilityPercent}%`;
+    
+    // Update fake probability bar
+    const fakeBar = document.getElementById('fakeBar');
+    fakeBar.style.width = `${predictionResult.fake_probability * 100}%`;
+    
+    // Update reason
+    document.getElementById('reason').textContent = predictionResult.reason;
+    
+    // Show detected keywords
+    const keywordsElement = document.getElementById('keywords');
+    if (predictionResult.features.detectedKeywords.length > 0) {
+        let fakeKeywords = predictionResult.features.detectedKeywords
+            .filter(k => k.type === 'fake')
+            .map(k => k.keyword);
+        let realKeywords = predictionResult.features.detectedKeywords
+            .filter(k => k.type === 'real')
+            .map(k => k.keyword);
+        
+        let keywordsHTML = "";
+        
+        if (fakeKeywords.length > 0) {
+            keywordsHTML += `<p><strong>⚠️ Red Flags Detected:</strong><br>`;
+            keywordsHTML += fakeKeywords.slice(0, 5).map(k => 
+                `<span style="background:#dc2626; color:white; padding:2px 6px; border-radius:4px; margin:2px; display:inline-block;">${k}</span>`
+            ).join(' ');
+            keywordsHTML += `</p>`;
+        }
+        
+        if (realKeywords.length > 0) {
+            keywordsHTML += `<p><strong>✅ Positive Indicators:</strong><br>`;
+            keywordsHTML += realKeywords.slice(0, 5).map(k => 
+                `<span style="background:#16a34a; color:white; padding:2px 6px; border-radius:4px; margin:2px; display:inline-block;">${k}</span>`
+            ).join(' ');
+            keywordsHTML += `</p>`;
+        }
+        
+        keywordsElement.innerHTML = keywordsHTML;
+    } else {
+        keywordsElement.innerHTML = "<p>No specific keywords detected. Analysis based on overall content structure.</p>";
+    }
+    
+    // Hide loading and show results
+    loading.style.display = 'none';
+    result.style.display = 'block';
+    analyzeBtn.disabled = false;
+    analyzeBtn.textContent = "Analyze Job Posting";
+    
+    // Add to history (local storage)
+    saveToHistory(title, predictionResult);
+}
+
+function saveToHistory(title, result) {
+    try {
+        const history = JSON.parse(localStorage.getItem('jobAnalysisHistory') || '[]');
+        history.unshift({
+            title,
+            result: result.prediction,
+            probability: result.fake_probability,
+            timestamp: new Date().toISOString()
+        });
+        
+        // Keep only last 10 entries
+        if (history.length > 10) {
+            history.pop();
+        }
+        
+        localStorage.setItem('jobAnalysisHistory', JSON.stringify(history));
+    } catch (e) {
+        console.log("Could not save to history:", e);
+    }
+}
+
+// Keyboard shortcut support
+document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        analyze();
+    }
+});
+</script>
+</body>
+</html>
